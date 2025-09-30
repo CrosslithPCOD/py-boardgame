@@ -101,9 +101,8 @@ if __name__ == "__main__":
 
         print(board)
 
-    
     # drawBoard()
-    
+
     def player_name():
         new = "y"
         name_list = []
