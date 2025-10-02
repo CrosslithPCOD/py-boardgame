@@ -6,7 +6,7 @@ def listen_for_server(sock):
     """Continuously listen for messages from the server."""
     while True:
         try:
-            message = sock.recv(1024).decode('utf-8')
+            message = sock.recv(16384).decode('utf-8')
             if not message:
                 break
             print("\n" + message)
