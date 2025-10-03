@@ -1,5 +1,6 @@
 ### when game start no more conn accept
-### fix the board drawing function
+### add test2 (number guesser)
+### try to get in a third 
 
 import socket
 import threading
@@ -9,111 +10,217 @@ import time
 HOST = '0.0.0.0'
 PORT = 12345
 turn = 1
+end = 0
+cBoard = ""
+diceTile = []
+pointTile = []
+gameTile = []
 players = [
-    # [0id,'1naam','2piece','3points', 4positions, 5smalldice, 6bigdice, 7address, 8 conn],
+    # [0id,1naam,2piece,3points, 4positions, 5address, 6conn, 7smalldice, 8bigdice, 9supredice],
 ]
 lock = threading.Lock()
 game_started = threading.Event()
+LIGHT_GREEN = "\033[92m"
+GREEN = "\033[32m"
+RED = "\033[91m"
+CYAN = "\033[96m"
+YELLOW = "\033[93m"
+RESET = "\033[0m"
 
 def broadcast(message):
     with lock:
         for p in players:
             try:
                 if isinstance(message, str):
-                    p[8].sendall(message.encode())
+                    p[6].sendall(message.encode())
                 else:
-                    p[8].sendall(message)
+                    p[6].sendall(message)
             except Exception as e:
                 print(f"Broadcast error to {p[1]}: {e}")
 
 def handle_client(conn, addr):
-    global players, turn
+    global players, turn, cBoard, diceTile, pointTile, gameTile, end
     try:
         conn.sendall(b'Enter your name: ')
         name = conn.recv(1024).decode().strip()
         with lock:
             player_id = len(players) + 1
             piece = chr(64 + player_id)
-            players.append([player_id, name, piece, 0, 0, 0, 0, addr[1], conn])
+            players.append([player_id, name, piece, 0, 0, addr[1], conn, 0, 0, 0])
             is_host = (player_id == 1)
             print(f'Player {player_id}: ({name}) connected from {addr}. Assigned piece: {piece}: ', players)
+            message = (
+                f"To play the game, you will need to roll dice and move your piece on the board.\n"
+                f"You can choose between {YELLOW}small dice{RESET} (1-3), {YELLOW}normal dice{RESET} (1-6), {YELLOW}big dice{RESET} (1-9) and {YELLOW}super dice{RESET} (4-9).\n"
+                "During play, you may encounter special events which can give you dice, points or minigames to participate in.\n"
+                "The goal is to reach the end of the board with as much points as possible! Points can be gained through tiles, minigames and reaching the end.\n"
+                "Good luck and have fun!\n"
+            )
+            conn.sendall(message.encode())
         if is_host:
-            conn.sendall(b'You are the host! Type "start" to begin the game when ready.\n')
+            conn.sendall(f'You are the host!\n'.encode())
+            conn.sendall(b'Type out which map you want to play on:\n')
+            conn.sendall(b'1. Snake (43 tiles)\n')
+            conn.sendall(b'2. Neo (45 tiles)\n')
+            while True:
+                msg = conn.recv(1024).decode().strip().lower()
+                if msg == 'snake':
+                    cBoard = "snake"
+                    diceTile = [2, 3, 7, 8, 12, 13, 17, 18, 22, 23, 27, 28, 32, 33, 37, 38, 42]
+                    pointTile = [4, 9, 14, 19, 24, 29, 34, 39]
+                    gameTile = [6, 11, 16, 21, 26, 31, 36, 41]
+                    end = 43
+                    break
+                if msg == 'neo':
+                    cBoard = "neo"
+                    diceTile = [3, 4, 7, 8, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31, 34]
+                    pointTile = [5, 9, 13, 17, 21, 25, 29, 33]
+                    gameTile = [6, 12, 16, 20, 24, 28, 32]
+                    end = 45
+                    break
+                else:
+                    conn.sendall(b'Invalid map.\n')
+                    continue
+            print(f"Map selected: {cBoard} with {end} tiles.")
+                
+            conn.sendall(b'Type "start" to begin the game when ready.')
             while True:
                 msg = conn.recv(1024).decode().strip().lower()
                 if msg == 'start':
                     print("Start received from host.")
                     broadcast(f'Host {name} started the game!\n')
                     game_started.set()
-                    print("Game started.")
                     break
                 else:
                     conn.sendall(b'Type "start" to begin the game.\n')
         else:
             conn.sendall(f'Welcome, {name}! Waiting for the host to start the game...\n'.encode())
         game_started.wait()
-        print("Game started, notifying players.")
+        print("Game started, notifying players.\n")
         broadcast(b'Game started!\n')
         
+        broadcast(f'Selected map: {cBoard} with {end} tiles.\n')
         for p in players:
             broadcast(f'Player {p[0]}: {p[1]} with piece {p[2]}\n')
         broadcast(b'Board generating in 5 seconds...\n')
         time.sleep(5)
+        broadcast(drawBoard())
         
         ### MAIN GAME LOOP ###
         while True:
-            broadcast(drawBoard())
             finish = False
             
             # find which player turn
             for q in players:
-                small_die = random.randint(1, 3)
-                normal_die = random.randint(1, 6)
-                big_die = random.randint(1, 12)
+                small_dice = random.randint(1, 3)
+                normal_dice = random.randint(1, 6)
+                big_dice = random.randint(1, 9)
+                super_dice = random.randint(4, 9)
                 move = ""
-                chosen_die = ""
+                chosen_dice = ""
+                msg_turn = ""
                 
-                broadcast(f"\nIt's {q[1]}'s turn (Piece: {q[2]}).\n")
+                broadcast(f"\nIt's {q[1]}'s turn.\n\n")
                 if turn == q[0]:
-                    if q[5] >= 1:
-                        q[8].sendall(f"You have {str(q[5])} small dice (1-3 eyes). Type \"small\" to throw a small dice.\n".encode())
-                    q[8].sendall(f"You have unlimited normal dice (1-6 eyes). Type \"normal\" to throw a normal dice.\n".encode())
-                    if q[6] >= 1:
-                        q[8].sendall(f"You have {str(q[6])} big dice (1-12 eyes). Type \"big\" to throw a small dice.\n".encode())
+                    if q[7] >= 1:
+                        q[6].sendall(f"You have {str(q[7])} {YELLOW}small dice{RESET} (1-3 eyes). Type \"small\" to throw a {YELLOW}small dice{RESET}.\n".encode())
+                    q[6].sendall(f"You have unlimited {YELLOW}normal dice{RESET} (1-6 eyes). Type \"normal\" to throw a {YELLOW}normal dice{RESET}.\n".encode())
+                    if q[8] >= 1:
+                        q[6].sendall(f"You have {str(q[8])} {YELLOW}big dice{RESET} (1-9 eyes). Type \"big\" to throw a {YELLOW}big dice{RESET}.\n".encode())
+                    if q[9] >= 1:
+                        q[6].sendall(f"You have {str(q[9])} {YELLOW}super dice{RESET} (4-9 eyes). Type \"super\" to throw a {YELLOW}super dice{RESET}.\n".encode())
                     
                     while True:
-                        msg = q[8].recv(1024).decode().strip().lower()
-                        if msg == 'small' and q[5] >= 1:
-                            move = small_die
+                        msg_turn = q[6].recv(1024).decode().strip().lower()
+                        if msg_turn == 'small' and q[7] >= 1:
+                            move = small_dice
                             q[4] += move
-                            q[5] -= 1
-                            chosen_die = "small die"
-                        elif msg == 'normal':
-                            move = normal_die
+                            q[7] -= 1
+                            chosen_dice = "small dice"
+                        elif msg_turn == 'normal':
+                            move = normal_dice
                             q[4] += move
-                            chosen_die = "normal die"
-                        elif msg == 'big' and q[6] >= 1:
-                            move = big_die
+                            chosen_dice = "normal dice"
+                        elif msg_turn == 'big' and q[8] >= 1:
+                            move = big_dice
                             q[4] += move
-                            q[6] -= 1
-                            chosen_die = "big die"
+                            q[8] -= 1
+                            chosen_dice = "big dice"
+                        elif msg_turn == 'super' and q[9] >= 1:
+                            move = super_dice
+                            q[4] += move
+                            q[9] -= 1
+                            chosen_dice = "super dice"
                         else:
-                            q[8].sendall(b'Invalid choice or no dice left. Try again.\n')
-                        if not chosen_die == "":
-                            turn += 1
-                            a = f"{q[1]} threw the {chosen_die}, rolling a {move}, moving to position {q[4]}.\n"
-                            broadcast(a)
-                            break
+                            q[6].sendall(b'Invalid choice or no dice left. Try again.\n')
+                            continue
+                        
+                        broadcast(f"{q[1]} threw the {chosen_dice}, rolling a {move}, moving to position {q[4]}.\n")
+                        turn += 1
+                        break
                 
-                #if q[5] in (2, 3, 7, 8, 12, 13, 17, 18, 22, 23, 27, 28, 32, 33, 37, 38, 42):
+                if q[4] in diceTile:
+                    random_bonus = random.randint(1, 11)
+                    random_amount = random.randint(1, 2)
                     
-                if q[4] == 43:
+                    if random_bonus in range(1, 6):
+                        q[7] += random_amount
+                        broadcast(f"{q[1]} found a {YELLOW}small dice{RESET} bonus! Now has {q[7]} small dice.\n")
+                    elif random_bonus in range(6, 11):
+                        q[8] += random_amount
+                        broadcast(f"{q[1]} found a {YELLOW}big dice{RESET} bonus! Now has {q[8]} big dice.\n")
+                    elif random_bonus == 11:
+                        q[9] += 1
+                        broadcast(f"{q[1]} found a {YELLOW}super dice{RESET} bonus! Now has {q[9]} super dice.\n")
+                
+                if q[4] in pointTile:
+                    random_points = random.randint(-5, 5)
+                    q[3] += random_points
+                    if random_points >= 0:
+                        broadcast(f"{q[1]} found a {YELLOW}point bonus{RESET}! Gained {random_points} points, now has {q[3]} points.\n")
+                    else:
+                        broadcast(f"{q[1]} hit a {RED}point penalty{RESET}! Lost {-random_points} points, now has {q[3]} points.\n")
+                
+                time.sleep(2)
+                broadcast(drawBoard())
+                
+                if q[4] in gameTile:
+                    random_game = random.randint(1, 1)
+                    
+                    if random_game == 1:
+                        broadcast(b'Speed typing minigame starting!\n')
+                        
+                        minigame_scores = []
+                        for p in players:
+                            try:
+                                score = speed_typing(p[6])
+                            except Exception as e:
+                                score = 0
+                                p[6].sendall(b"Error during minigame. Score: 0\n")
+                            p[3] += score
+                            minigame_scores.append((p[1], score, p[3]))
+                            
+                        for name, score, total in minigame_scores:
+                            broadcast(f"{name} scored {score} points in the minigame, now has {total} points.\n")
+                        broadcast(b'Loading...\n')
+                        time.sleep(3)
+                                        
+                if q[4] >= end:
+                    q[4] == end
                     broadcast(f"\n{q[1]} has reached the end and wins the game! Congratulations!\n")
                     finish = True
                 if turn == len(players) + 1:
                     turn = 1
             if finish:
                 break
+        broadcast("Game over! Final scores:\n")
+        for p in players:
+            broadcast(f"{p[1]}: {p[3]} points\n")
+            broadcast(b'Thank you for playing!\n')
+            broadcast(b'The server will shut down in 10 seconds.\n')
+            time.sleep(10)
+            broadcast(b'Server shutting down.\n')
+            conn.close()
             
         while True:
             data = conn.recv(1024)
@@ -122,10 +229,9 @@ def handle_client(conn, addr):
                 break
     except Exception as e:
         print(f"Error with client {addr}: {e}")
-    finally:
-        with lock:
-            players = [p for p in players if p[7] != addr[1]]
-        conn.close()
+    with lock:
+        players = [p for p in players if p[5] != addr[1]]
+    conn.close()    
 
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -144,66 +250,185 @@ def drawBoard():
                     return " " + str(p[2])
                 return str(p[2])
         return str(pos)
-    
-    board = (
-        "                                                                                                    @@             \n"
-        "                                                                                                    @@             \n"
-        "                                                                                                    @@             \n"
-        "                                                                                                    @@@@@@@        \n"
-        "                                                                                                   @@              \n"
-        "                                                                                        @@@@@@@@@@@@               \n"
-        "                                                                                 @@@@@@@@@     -@@@                \n"
-        "                                                                               @@@                @                \n"
-        "                         @@@@@@@@@@@@@@@+                                    :@@                  @@               \n"
-        "                    @@@@@@  @        @ @@@@@@                                @@      @@@          @@               \n"
-        "                 @@@@        @  "+ str(a(34)) +"  @      @ @@@@%                           @@     @@            @@               \n"
-        "              =@@@   @@   "+ str(a(33)) +"  @    @  "+ str(a(35)) +"   @     @@@@@                       @@             @     @@               \n"
-        "             @@        @@@    @    @      @@      @  @@@@@                   @@            @@     @                \n"
-        "           @@@ @@   "+ str(a(32)) +"    @    @  @       @  "+ str(a(36)) +"   @      @@@@@               @     "+ str(a(43)) +"     @@     @@                \n"
-        "          @@     @@@       @@@@@@@@@@@-  @       @  "+ str(a(37)) +"  @    @@@@@@@@     @@@                   @@                 \n"
-        "         @@    "+ str(a(31)) +"   @  @@@@            @@@@@   @@      @     @     @ @@@@@   @@               @@@                  \n"
-        "         @@@@@@      @@@                   @@@@       @ "+ str(a(38)) +"  @     @   @   @    @      @@@@@@@@@                    \n"
-        "        @@     @@@@ @@                         @@@+  @     @  "+ str(a(39)) +" @    @   @     @    @@                            \n"
-        "        @.  "+ str(a(30)) +"     @@:                            @@@@    @     @ "+ str(a(40)) +"  @    @ "+ str(a(42)) +"  @  @@                             \n"
-        "        @       @@@ @@                               @@@@@     @     @  "+ str(a(41)) +"  @     @@@                              \n"
-        "        @@   @@@     #@@                                 @@@@ @      @      @   @@@                                \n"
-        "         @@@@       @  @@@@                                  @@@@@@  @       @@@@                                  \n"
-        "         @@    "+ str(a(29)) +"  @      @@@@@                                   @@@@@@@@@@@                                      \n"
-        "          @@      @       @   @@@@@                                                                                \n"
-        "           @@=   @   "+ str(a(28)) +"   @      @@@@@@@@                                                                          \n"
-        "            @@@  @       @      @      @@@@@@@@                                                                    \n"
-        "              @@@        @  "+ str(a(27)) +"  @      @    @@@@@@@@@@@                                                            \n"
-        "                @@@@    @      @@  "+ str(a(26)) +"  @      @     @@@@@@@@@@@@                                                   \n"
-        "                   @@@@ @      @      @@      @       @     @@@@@@@@@@@@@                                          \n"
-        "                      @@@@@    @      @   "+ str(a(25)) +" @@       @      @        @@@@@@@@                                     \n"
-        "                          @@@@@       @      @   "+ str(a(24)) +"  @       @       @       @@@@@                                 \n"
-        "                              @@@@@@  @      @       @  "+ str(a(23)) +"  @   "+ str(a(22)) +"  @       @     @@@                              \n"
-        "                                    @@@@@@@  @       @      @       @  "+ str(a(21)) +"  @         @@@                           \n"
-        "                                           @@@@@@@@@@@@     @      @      @   "+ str(a(20)) +"   @@  @@@                         \n"
-        "                                                       @@@@@@@@@@@@@     @       @@      @@                        \n"
-        "                  @@@@@@@@@@@@@@@                                   @@@@@@     @@   "+ str(a(19)) +"    @@                       \n"
-        "               @@@        @      @@@@@                                   @@@@ @          @ @@                      \n"
-        "              @@@     "+ str(a(6)) +"   @     @     @@@@                                  @@@      @@@@   @@                     \n"
-        "             @@  @@@     @  "+ str(a(7)) +"  @      @  .@@@:                                @@ @@@@        @                     \n"
-        "             @@     @@@  @     @  "+ str(a(8)) +"  @     @ @@@@                              @@            @                     \n"
-        "            .@   "+ str(a(5)) +"     @ @    @     @  "+ str(a(9)) +"  @     @@@@                           @@     "+ str(a(18)) +"     @                     \n"
-        "            %@      @@@ @@@@@@@@   @     @ "+ str(a(10)) +"  @    @@@@                       @@@           @                     \n"
-        "            +@  @@@@   @@@      @@@@.   @     @      @  @@@@@                @@@  @@        @@                     \n"
-        "             @@@       #@           @@@@    @@  11  @     @ .@@@@@@@@@@@@@@@@@@     @@@    @@                      \n"
-        "             @@    K   @@@              @@@@       @ "+ str(a(12)) +"  @      @    @    @    @       @@ @@                       \n"
-        "              @@     @@  @@                @@@@   @     @  "+ str(a(13)) +"  @     @     @    @  "+ str(a(17)) +"    @@                        \n"
-        "               @@ @@@@    @@@@                @@@@@    @      @  "+ str(a(14)) +"  @ "+ str(a(15)) +"  @ "+ str(a(16)) +"  @     @@@                         \n"
-        "                @@@    "+ str(a(3)) +"     @@@@                 @@@@@@     @      @      @      @  @@@@                          \n"
-        "                  @@       @@   @@@@                 %@@@@@  @      @       @      @@@@                            \n"
-        "                    @@@  @@   "+ str(a(2)) +"   @@@@@@                  @@@@@@@%   @        @@@@@@                               \n"
-        "                      @@@@       @@@   @@                       @@@@@@@@@@@@@@@                                    \n"
-        "                         @@@@  @@@   "+ str(a(1)) +"  @@@                                                                        \n"
-        "                            @@@@@         @@                                                                       \n"
-        "                                 @@@@@    @@                                                                       \n"
-        "                                      @@@@@                                                                        \n"
-    )
+
+    if cBoard == "snake":
+        board = [
+            [( "                                                                                                    @@", LIGHT_GREEN)],
+            [( "                                                                                                    @@", LIGHT_GREEN)],
+            [( "                                                                                                    @@", LIGHT_GREEN)],
+            [( "                                                                                                    @@@@@@@", LIGHT_GREEN)],
+            [( "                                                                                                   @@", LIGHT_GREEN)],
+            [( "                                                                                        @@@@@@@@@@@@", LIGHT_GREEN)],
+            [( "                                                                                 @@@@@@@@@     -@@@", LIGHT_GREEN)],
+            [( "                                                                               @@@                @", LIGHT_GREEN)],
+            [( "                         @@@@@@@@@@@@@@@+                                    :@@                  @@", LIGHT_GREEN)],
+            [( "                    @@@@@@  @        @ @@@@@@                                @@      @@@          @@", LIGHT_GREEN)],
+            [( "                 @@@@        @  ", LIGHT_GREEN), (a(34), RED), ("  @      @ @@@@%                           @@     @@            @@", LIGHT_GREEN)],
+            [( "              =@@@   @@   ", LIGHT_GREEN), (a(33), RED), ("  @    @  ", LIGHT_GREEN), (a(35), RED), ("   @     @@@@@                       @@             @     @@", LIGHT_GREEN)],
+            [( "             @@        @@@    @    @      @@      @  @@@@@                   @@            @@     @", LIGHT_GREEN)],
+            [( "           @@@ @@   ", LIGHT_GREEN), (a(32), RED), ("    @    @  @       @  ", LIGHT_GREEN), (a(36), RED), ("   @      @@@@@               @     ", LIGHT_GREEN), (a(43), RED), ("     @@     @@", LIGHT_GREEN)],
+            [( "          @@     @@@       @@@@@@@@@@@-  @       @  ", LIGHT_GREEN), (a(37), RED), ("  @    @@@@@@@@     @@@                   @@", LIGHT_GREEN)],
+            [( "         @@    ", LIGHT_GREEN), (a(31), RED), ("   @  @@@@            @@@@@   @@      @     @     @ @@@@@   @@               @@@", LIGHT_GREEN)],
+            [( "         @@@@@@      @@@                   @@@@       @ ", LIGHT_GREEN), (a(38), RED), ("  @     @   @   @    @      @@@@@@@@@", LIGHT_GREEN)],
+            [( "        @@     @@@@ @@                         @@@+  @     @  ", LIGHT_GREEN), (a(39), RED), (" @    @   @     @    @@", LIGHT_GREEN)],
+            [( "        @.  ", LIGHT_GREEN), (a(30), RED), ("     @@:                            @@@@    @     @ ", LIGHT_GREEN), (a(40), RED), ("  @    @ ", LIGHT_GREEN), (a(42), RED), ("  @  @@", LIGHT_GREEN)],
+            [( "        @       @@@ @@                               @@@@@     @     @  ", LIGHT_GREEN), (a(41), RED), ("  @     @@@", LIGHT_GREEN)],
+            [( "        @@   @@@     #@@                                 @@@@ @      @      @   @@@", LIGHT_GREEN)],
+            [( "         @@@@       @  @@@@                                  @@@@@@  @       @@@@", LIGHT_GREEN)],
+            [( "         @@    ", LIGHT_GREEN), (a(29), RED), ("  @      @@@@@                                   @@@@@@@@@@@", LIGHT_GREEN)],
+            [( "          @@      @       @   @@@@@", LIGHT_GREEN)],
+            [( "           @@=   @   ", LIGHT_GREEN), (a(28), RED), ("   @      @@@@@@@@", LIGHT_GREEN)],
+            [( "            @@@  @       @      @      @@@@@@@@", LIGHT_GREEN)],
+            [( "              @@@        @  ", LIGHT_GREEN), (a(27), RED), ("  @      @    @@@@@@@@@@@", LIGHT_GREEN)],
+            [( "                @@@@    @      @@  ", LIGHT_GREEN), (a(26), RED), ("  @      @     @@@@@@@@@@@@", LIGHT_GREEN)],
+            [( "                   @@@@ @      @      @@      @       @     @@@@@@@@@@@@@", LIGHT_GREEN)],
+            [( "                      @@@@@    @      @   ", LIGHT_GREEN), (a(25), RED), (" @@       @      @        @@@@@@@@", LIGHT_GREEN)],
+            [( "                          @@@@@       @      @   ", LIGHT_GREEN), (a(24), RED), ("  @       @       @       @@@@@", LIGHT_GREEN)],
+            [( "                              @@@@@@  @      @       @  ", LIGHT_GREEN), (a(23), RED), ("  @   ", LIGHT_GREEN), (a(22), RED), ("  @       @     @@@", LIGHT_GREEN)],
+            [( "                                    @@@@@@@  @       @      @       @  ", LIGHT_GREEN), (a(21), RED), ("  @         @@@", LIGHT_GREEN)],
+            [( "                                           @@@@@@@@@@@@     @      @      @   ", LIGHT_GREEN), (a(20), RED), ("   @@  @@@", LIGHT_GREEN)],
+            [( "                                                       @@@@@@@@@@@@@     @       @@      @@", LIGHT_GREEN)],
+            [( "                  @@@@@@@@@@@@@@@                                   @@@@@@     @@   ", LIGHT_GREEN), (a(19), RED), ("    @@", LIGHT_GREEN)],
+            [( "               @@@        @      @@@@@                                   @@@@ @          @ @@", LIGHT_GREEN)],
+            [( "              @@@     ", LIGHT_GREEN), (a(6), RED), ("   @     @     @@@@                                  @@@      @@@@   @@", LIGHT_GREEN)],
+            [( "             @@  @@@     @  ", LIGHT_GREEN), (a(7), RED), ("  @      @  .@@@:                                @@ @@@@        @", LIGHT_GREEN)],
+            [( "             @@     @@@  @     @  ", LIGHT_GREEN), (a(8), RED), ("  @     @ @@@@                              @@            @", LIGHT_GREEN)],
+            [( "            .@   ", LIGHT_GREEN), (a(5), RED), ("     @ @    @     @  ", LIGHT_GREEN), (a(9), RED), ("  @     @@@@                           @@     ", LIGHT_GREEN), (a(18), RED), ("     @", LIGHT_GREEN)],
+            [( "            %@      @@@ @@@@@@@@   @     @ ", LIGHT_GREEN), (a(10), RED), ("  @    @@@@                       @@@           @", LIGHT_GREEN)],
+            [( "            +@  @@@@   @@@      @@@@.   @     @      @  @@@@@                @@@  @@        @@", LIGHT_GREEN)],
+            [( "             @@@       #@           @@@@    @@  ", LIGHT_GREEN), (a(11), RED), ("  @     @ .@@@@@@@@@@@@@@@@@@     @@@    @@", LIGHT_GREEN)],
+            [( "             @@    ", LIGHT_GREEN), (a(4), RED), ("   @@@              @@@@       @ ", LIGHT_GREEN), (a(12), RED), ("  @      @    @    @    @       @@ @@", LIGHT_GREEN)],
+            [( "              @@     @@  @@                @@@@   @     @  ", LIGHT_GREEN), (a(13), RED), ("  @     @     @    @  ", LIGHT_GREEN), (a(17), RED), ("    @@", LIGHT_GREEN)],
+            [( "               @@ @@@@    @@@@                @@@@@    @      @  ", LIGHT_GREEN), (a(14), RED), ("  @ ", LIGHT_GREEN), (a(15), RED), ("  @ ", LIGHT_GREEN), (a(16), RED), ("  @     @@@", LIGHT_GREEN)],
+            [( "                @@@    ", LIGHT_GREEN), (a(3), RED), ("     @@@@                 @@@@@@     @      @      @      @  @@@@", LIGHT_GREEN)],
+            [( "                  @@       @@   @@@@                 %@@@@@  @      @       @      @@@@", LIGHT_GREEN)],
+            [( "                    @@@  @@   ", LIGHT_GREEN), (a(2), RED), ("   @@@@@@                  @@@@@@@%   @        @@@@@@", LIGHT_GREEN)],
+            [( "                      @@@@       @@@   @@                       @@@@@@@@@@@@@@@", LIGHT_GREEN)],
+            [( "                         @@@@  @@@   ", LIGHT_GREEN), (a(1), RED), ("  @@@", LIGHT_GREEN)],
+            [( "                            @@@@@         @@", LIGHT_GREEN)],
+            [( "                                 @@@@@    @@", LIGHT_GREEN)],
+            [( "                                      @@@@@", LIGHT_GREEN)],
+        ]
+    elif cBoard == "neo":
+        board = [
+            [("                                                    @                                                     ", YELLOW)],
+            [("                                                   @ @                                                    ", YELLOW)],
+            [("                                                  @   @                                                   ", YELLOW)],
+            [("                                                 @     @                                                  ", YELLOW)],
+            [("                                           @@@@@@  " + CYAN + str(a(45)) + YELLOW + "   @@@@@@                                            ", YELLOW)],
+            [("                                             @@@@       @@@@                                              ", YELLOW)],
+            [("                                                 @  @  @                                                  ", YELLOW)],
+            [("                                                @  @ @  @                                                 ", YELLOW)],
+            [("                                               @  @   @  @                                                ", YELLOW)],
+            [("                                              @   @   @   @                                               ", YELLOW)],
+            [("                                   @@@       @   @     @   @        @@@                                   ", YELLOW)],
+            [("                              @@@@@   @@@@   @  @   " + CYAN + str(a(44)) + YELLOW + "  @  @   @@@@@  @@@@@@                              ", YELLOW)],
+            [("                           @@@            @@@@ @    @    @ @@@@             @@                            ", YELLOW)],
+            [("                         @@     " + CYAN + str(a(32)) + YELLOW + "  @@@@@@@@@  @   @ @   @  @@@@@@@@@  " + CYAN + str(a(43)) + YELLOW + "     @@                          ", YELLOW)],
+            [("                        @    " + CYAN + str(a(31)) + YELLOW + "   @@         @@   @   @   @@         @@   " + CYAN + str(a(42)) + YELLOW + "    @                         ", YELLOW)],
+            [("                       @         @   @@@@@@@      @   @     @@@@@@@   @         @                        ", YELLOW)],
+            [("                       @       @@  @@       @@@  @     @  @@@       @@  @@       @                        ", YELLOW)],
+            [("                       @  " + CYAN + str(a(30)) + YELLOW + "  @   @    " + CYAN + str(a(33)) + YELLOW + "      @@       @@      " + CYAN + str(a(39)) + YELLOW + "    @   @  " + CYAN + str(a(41)) + YELLOW + "  @                        ", YELLOW)],
+            [("                       @      @   @                                   @   @      @                        ", YELLOW)],
+            [("                       @      @   @    " + CYAN + str(a(34)) + YELLOW + "                       " + CYAN + str(a(38)) + YELLOW + "    @   @      @                        ", YELLOW)],
+            [("                       @  " + CYAN + str(a(29)) + YELLOW + "  @   @        " + CYAN + str(a(35)) + YELLOW + "      " + CYAN + str(a(36)) + YELLOW + "       " + CYAN + str(a(37)) + YELLOW + "        @   @  " + CYAN + str(a(40)) + YELLOW + "  @                        ", YELLOW)],
+            [("                        @     @    @                                  @   @     @                         ", YELLOW)],
+            [("                         @@@@@@@   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@   @@@@@@@                          ", YELLOW)],
+            [("               @@@                                                                                        ", YELLOW)],
+            [("               @  @@     @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@      @@@@@                ", YELLOW)],
+            [("                @   @@   @                          " + CYAN + str(a(28)) + YELLOW + "                        @    @@    @                ", YELLOW)],
+            [("                @    @   @     " + CYAN + str(a(10)) + YELLOW + "    " + CYAN + str(a(11)) + YELLOW + "    " + CYAN + str(a(12)) + YELLOW + "   " + CYAN + str(a(13)) + YELLOW + "      " + CYAN + str(a(14)) + YELLOW + "   " + CYAN + str(a(15)) + YELLOW + "   " + CYAN + str(a(16)) + YELLOW + "   " + CYAN + str(a(17)) + YELLOW + "     @    @    @                 ", YELLOW)],
+            [("                @    @   @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@    @    @                 ", YELLOW)],
+            [("                 @@  @                                                             @  @@                  ", YELLOW)],
+            [("                   @@ @ " + RED + "  @@@@@@@@@@@@   @@@@@@@@@@@@@@@@@@@@@@@   @@@@@@@@@@@@@ " + YELLOW + "  @@@                    ", YELLOW)],
+            [("                     @@ " + RED + "  @     " + CYAN + str(a(9)) + RED + "     @   @         " + CYAN + str(a(27)) + RED + "         @   @    " + CYAN + str(a(18)) + RED + "    @ " + YELLOW + "  @@                      ", YELLOW)],
+            [("           @@@@@@@   @@  " + RED + " @           @   @                   @   @           @ " + YELLOW + "  @@   @@@@@@@            ", YELLOW)],
+            [("             @@   @@ @ @ " + RED + " @     " + CYAN + str(a(8)) + RED + "      @   @@       " + CYAN + str(a(26)) + RED + "       @   @     " + CYAN + str(a(19)) + RED + "     @ " + YELLOW + " @ @ @@   @@              ", YELLOW)],
+            [("               @@@@@@@ @  " + RED + " @            @    @@@          @@@    @           @  " + YELLOW + " @ @@@@@@@                ", YELLOW)],
+            [("                      @ @ " + RED + " @      " + CYAN + str(a(7)) + RED + "      @      @@@@@@@@@@     @@     " + CYAN + str(a(20)) + RED + "     @ " + YELLOW + " @ @                       ", YELLOW)],
+            [("                       @ @ " + RED + " @@            @@@               @@@             @ " + YELLOW + "  @ @                       ", YELLOW)],
+            [("                       @ @  " + RED + "  @     " + CYAN + str(a(6)) + RED + "        @@@         @@@       " + CYAN + str(a(21)) + RED + "      @ " + YELLOW + "  @ @                        ", YELLOW)],
+            [("                        @ @@ " + RED + " @@                @@@@@@@@@                @@ " + YELLOW + "  @ @                         ", YELLOW)],
+            [("                         @  @  " + RED + " @      " + CYAN + str(a(5)) + RED + "                        " + CYAN + str(a(22)) + RED + "      @  " + YELLOW + " @@ @                          ", YELLOW)],
+            [("               @@@@@@@@@@    @@ " + RED + " @@@       " + CYAN + str(a(4)) + RED + "       " + CYAN + str(a(25)) + RED + "      " + CYAN + str(a(23)) + RED + "        @@@  " + YELLOW + " @    @@@@@@@@@@                ", YELLOW)],
+            [("                 @@@@@@@@@@@@  @  " + RED + "  @@          " + CYAN + str(a(3)) + RED + "      " + CYAN + str(a(24)) + RED + "          @@  " + YELLOW + "  @@ @@@@@@@@@@@@                  ", YELLOW)],
+            [("                             @@ @@@  " + RED + " @@@@          " + CYAN + str(a(2)) + RED + "          @@@@  " + YELLOW + "  @@  @                              ", YELLOW)],
+            [("                               @@  @@   " + RED + "  @@@@@@@@     @@@@@@@@   " + YELLOW + "  @@@  @@                               ", YELLOW)],
+            [("                                 @@  @@@    " + RED + "      @@@@@     " + YELLOW + "     @@@  @@@                                 ", YELLOW)],
+            [("                                   @    @@@@@               @@@@@    @                                    ", YELLOW)],
+            [("                              @@@@@  @@@@@   @@@@@@@@@@@@@@@   @@@@@  @@@@@                               ", YELLOW)],
+            [("                            @@@@@ @@@     @@@@@@         @@@@@@     @@@ @@@@@                             ", YELLOW)],
+            [("                                 @              @   " + CYAN + str(a(1)) + YELLOW + "   @              @                                  ", YELLOW)],
+            [("                                                 @     @                                                  ", YELLOW)],
+            [("                                                  @   @                                                   ", YELLOW)],
+            [("                                                  @   @                                                   ", YELLOW)],
+            [("                                                  @   @                                                   ", YELLOW)],
+            [("                                                   @ @                                                    ", YELLOW)],
+            [("                                                    @                                                     ", YELLOW)],
+            [("                                                    @                                                     ", YELLOW)],
+        ]
+
+    colored_board = ""
+    for line in board:
+        for segment, color in line:
+            colored_board += color + segment
+        colored_board += RESET + "\n"
+    board = colored_board
     
     return board
+            
+def speed_typing(conn):
+    base = 3
+    size = 3
+    turn = 0
+    score = 0
+    conn.sendall(b"Type the given letters as fast as possible; there is a time limit!\n")
+    conn.sendall(b"Words will be sent right after each other, so get ready!\n")
+    conn.sendall(b"5...")
+    time.sleep(1)
+    conn.sendall(b"4...")
+    time.sleep(1)
+    conn.sendall(b"3...")
+    time.sleep(1)
+    conn.sendall(b"2...")
+    time.sleep(1)
+    conn.sendall(b"1...")
+    time.sleep(1)
+    while True:
+        letters = ""
+        if turn == 3:
+            size += 1
+            turn = 0
+        for j in range(size):
+            letters += chr(random.randint(ord("a"), ord("z")))
+        timer = (base + (len(letters) - 3 * 0.5)) - turn
+        conn.sendall(f"Type this: {letters}\n".encode())
+        s = time.perf_counter()
+        try:
+            conn.settimeout(timer + 1)
+            x = conn.recv(1024).decode().strip()
+            e = time.perf_counter()
+        except socket.timeout:
+            conn.sendall(b"You typed too slow.\n")
+            break
+        finally:
+            conn.settimeout(None)
+        if x != letters:
+            conn.sendall(b"You typed wrong.\n")
+            break
+        if (e - s) > timer:
+            conn.sendall(b"You typed too slow.\n")
+            break
+        turn += 1
+        score += 1
+        if score >= 9:
+            conn.sendall(b"You got everything correct. Your score is: 9 points!\n")
+            score = 9
+            break
+    return score
+
+def number_guess(conn):
+    
 
 if __name__ == '__main__':
     main()
