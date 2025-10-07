@@ -3,7 +3,6 @@ import socket
 import threading
 
 def listen_for_server(sock):
-    """Continuously listen for messages from the server."""
     while True:
         try:
             message = sock.recv(16384).decode('utf-8')

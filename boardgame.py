@@ -1,6 +1,7 @@
 ### when game start no more conn accept
 ### ending with points instead of who reaches first; loop board until everyone passes through end atleast once
 ### if not player asked for input, their message will be ignored UNLESS socket disconnect
+### improve player appending
 
 with open("words_alpha.txt") as f:
     word_set = set(word.strip().lower() for word in f)
@@ -18,7 +19,7 @@ diceTile = []
 pointTile = []
 gameTile = []
 players = [
-    # [0id,1naam,2piece,3points, 4positions, 5address, 6conn, 7smalldice, 8bigdice, 9superdice],
+    # [0id, 1naam, 2piece, 3points, 4positions, 5address, 6conn, 7smalldice, 8bigdice, 9superdice],
 ]
 lock = threading.Lock()
 game_started = threading.Event()
@@ -29,6 +30,7 @@ CYAN = "\033[96m"
 YELLOW = "\033[93m"
 RESET = "\033[0m"
 
+# talk to all players
 def broadcast(message):
     with lock:
         for p in players:
@@ -40,11 +42,13 @@ def broadcast(message):
             except Exception as e:
                 print(f"Broadcast error to {p[1]}: {e}")
 
+# all main functionality
 def handle_client(conn, addr):
     global players, turn, cBoard, diceTile, pointTile, gameTile, end
     try:
         conn.sendall(b'Enter your name: ')
         name = conn.recv(1024).decode().strip()
+        # welcome and register new players
         with lock:
             player_id = len(players) + 1
             piece = chr(64 + player_id)
@@ -59,6 +63,7 @@ def handle_client(conn, addr):
                 "Good luck and have fun!\n"
             )
             conn.sendall(message.encode())
+        # if player == 0, become host
         if is_host:
             conn.sendall(f'You are the host!\n'.encode())
             conn.sendall(b'Type out which map you want to play on:\n')
@@ -84,7 +89,6 @@ def handle_client(conn, addr):
                     conn.sendall(b'Invalid map.\n')
                     continue
             print(f"Map selected: {cBoard} with {end} tiles.")
-                
             conn.sendall(b'Type "start" to begin the game when ready.')
             while True:
                 msg = conn.recv(1024).decode().strip().lower()
@@ -97,6 +101,8 @@ def handle_client(conn, addr):
                     conn.sendall(b'Type "start" to begin the game.\n')
         else:
             conn.sendall(f'Welcome, {name}! Waiting for the host to start the game...\n'.encode())
+        
+        # wait until host unlocks 
         game_started.wait()
         print("Game started, notifying players.\n")
         broadcast(b'Game started!\n')
@@ -251,7 +257,7 @@ def handle_client(conn, addr):
         print(f"Error with client {addr}: {e}")
     with lock:
         players = [p for p in players if p[5] != addr[1]]
-    conn.close()    
+    conn.close()
 
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
