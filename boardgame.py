@@ -1,7 +1,9 @@
 ### when game start no more conn accept
-### add test2 (number guesser)
-### try to get in a third 
+### ending with points instead of who reaches first; loop board until everyone passes through end atleast once
+### if not player asked for input, their message will be ignored UNLESS socket disconnect
 
+with open("words_alpha.txt") as f:
+    word_set = set(word.strip().lower() for word in f)
 import socket
 import threading
 import random
@@ -16,7 +18,7 @@ diceTile = []
 pointTile = []
 gameTile = []
 players = [
-    # [0id,1naam,2piece,3points, 4positions, 5address, 6conn, 7smalldice, 8bigdice, 9supredice],
+    # [0id,1naam,2piece,3points, 4positions, 5address, 6conn, 7smalldice, 8bigdice, 9superdice],
 ]
 lock = threading.Lock()
 game_started = threading.Event()
@@ -67,15 +69,15 @@ def handle_client(conn, addr):
                 if msg == 'snake':
                     cBoard = "snake"
                     diceTile = [2, 3, 7, 8, 12, 13, 17, 18, 22, 23, 27, 28, 32, 33, 37, 38, 42]
-                    pointTile = [4, 9, 14, 19, 24, 29, 34, 39]
-                    gameTile = [6, 11, 16, 21, 26, 31, 36, 41]
+                    pointTile = [4, 9, 14, 19, 24, 29, 31, 36, 34, 39]
+                    gameTile = [6, 11, 16, 21, 26, 41]
                     end = 43
                     break
                 if msg == 'neo':
                     cBoard = "neo"
                     diceTile = [3, 4, 7, 8, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31, 34]
-                    pointTile = [5, 9, 13, 17, 21, 25, 29, 33]
-                    gameTile = [6, 12, 16, 20, 24, 28, 32]
+                    pointTile = [5, 9, 12, 13, 17, 20, 21, 25, 29, 33]
+                    gameTile = [6, 16, 24, 28, 32]
                     end = 45
                     break
                 else:
@@ -204,6 +206,22 @@ def handle_client(conn, addr):
                             broadcast(f"{name} scored {score} points in the minigame, now has {total} points.\n")
                         broadcast(b'Loading...\n')
                         time.sleep(3)
+                        
+                    elif random_game == 2:
+                        broadcast(b'Numer guessing minigame starting!\n')
+                        
+                        number_guess()
+                        
+                        broadcast(b'Loading...\n')
+                        time.sleep(3)
+                        
+                    elif random_game == 3:
+                        broadcast(b'Word guessing minigame starting!\n')
+                        
+                        word_guess()
+                        
+                        broadcast(b'Loading...\n')
+                        time.sleep(3)
                                         
                 if q[4] >= end:
                     q[4] == end
@@ -211,6 +229,8 @@ def handle_client(conn, addr):
                     finish = True
                 if turn == len(players) + 1:
                     turn = 1
+                    for p in players:
+                        broadcast(f"{p[1]} has {p[3]} points\n")
             if finish:
                 break
         broadcast("Game over! Final scores:\n")
@@ -376,7 +396,7 @@ def drawBoard():
     board = colored_board
     
     return board
-            
+
 def speed_typing(conn):
     base = 3
     size = 3
@@ -384,12 +404,8 @@ def speed_typing(conn):
     score = 0
     conn.sendall(b"Type the given letters as fast as possible; there is a time limit!\n")
     conn.sendall(b"Words will be sent right after each other, so get ready!\n")
-    conn.sendall(b"5...")
-    time.sleep(1)
-    conn.sendall(b"4...")
-    time.sleep(1)
-    conn.sendall(b"3...")
-    time.sleep(1)
+    conn.sendall(b"Starting in 5...")
+    time.sleep(3)
     conn.sendall(b"2...")
     time.sleep(1)
     conn.sendall(b"1...")
@@ -403,9 +419,9 @@ def speed_typing(conn):
             letters += chr(random.randint(ord("a"), ord("z")))
         timer = (base + (len(letters) - 3 * 0.5)) - turn
         conn.sendall(f"Type this: {letters}\n".encode())
-        s = time.perf_counter()
         try:
             conn.settimeout(timer + 1)
+            s = time.perf_counter()
             x = conn.recv(1024).decode().strip()
             e = time.perf_counter()
         except socket.timeout:
@@ -428,7 +444,55 @@ def speed_typing(conn):
     return score
 
 def number_guess(conn):
-    
+    import random
+    turn = 3
+    score = 5
+    top = 10
+    ready = ""
+    print("Guess the right number between 1 and 10\n"
+          "Type 'start' when you're ready")
+    while ready != "start":
+        ready = input()
+    print("")
+
+    num = random.randint(1, 10)
+    while turn > 0:
+        print(num)
+        print(f"You still have {turn} guesses left")
+        guess = int(input("The number is? "))
+        diff = num - guess
+        if diff > 0:
+            print("Your number is too small")
+        if diff < 0:
+            print("Your number is too big")
+        if diff == 0:
+            turn = 0
+        diff = pow(pow(diff, 2), 0.5)
+        if diff <= top:
+            top = diff
+        turn = turn - 1
+    high = score - top
+    print(f"The correct number is {num}\n"
+          f"You score {high} points!")
+    return high
+
+def word_guess():
+    import time
+    word = random.choice(list(word_set))
+    broadcast(b"Each player in order of turns, will be given 2 letters with which to form a word.\n")
+    broadcast(b"The word has to be a real word, and the letters can be anywhere in the word.\n")
+    conn.sendall(b"Starting in 5...")
+    time.sleep(3)
+    conn.sendall(b"2...")
+    time.sleep(1)
+    conn.sendall(b"1...")
+    time.sleep(1)
+    while True:
+        for p in players:
+            if turn == p[0]:
+                print("Player choosing: ", p)
+                msg_turn = q[6].recv(1024).decode().strip().lower()
+            
 
 if __name__ == '__main__':
     main()
