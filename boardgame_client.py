@@ -14,8 +14,8 @@ def listen_for_server(sock):
 
 def main():
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect(('10.233.202.156', 12345)) # hotspot
-    #client.connect(('127.0.0.1', 12345))  # local machine
+    #client.connect(('10.233.202.156', 12345)) # hotspot
+    client.connect(('127.0.0.1', 50000))  # local machine
 
     threading.Thread(target=listen_for_server, args=(client,), daemon=True).start()
 

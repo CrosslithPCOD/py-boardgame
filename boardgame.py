@@ -11,7 +11,7 @@ import random
 import time
 
 HOST = '0.0.0.0'
-PORT = 12345
+PORT = 50000
 turn = 1
 end = 0
 cBoard = ""
@@ -83,7 +83,7 @@ def handle_client(conn, addr):
                     diceTile = [3, 4, 7, 8, 10, 11, 14, 15, 18, 19, 22, 23, 26, 27, 30, 31, 34]
                     pointTile = [5, 9, 12, 13, 17, 20, 21, 25, 29, 33]
                     gameTile = [6, 16, 24, 28, 32]
-                    end = 45
+                    end = 35
                     break
                 else:
                     conn.sendall(b'Invalid map.\n')
@@ -195,39 +195,7 @@ def handle_client(conn, addr):
                 if q[4] in gameTile:
                     random_game = random.randint(1, 1)
                     
-                    if random_game == 1:
-                        broadcast(b'Speed typing minigame starting!\n')
-                        
-                        minigame_scores = []
-                        for p in players:
-                            try:
-                                score = speed_typing(p[6])
-                            except Exception as e:
-                                score = 0
-                                p[6].sendall(b"Error during minigame. Score: 0\n")
-                            p[3] += score
-                            minigame_scores.append((p[1], score, p[3]))
-                            
-                        for name, score, total in minigame_scores:
-                            broadcast(f"{name} scored {score} points in the minigame, now has {total} points.\n")
-                        broadcast(b'Loading...\n')
-                        time.sleep(3)
-                        
-                    elif random_game == 2:
-                        broadcast(b'Numer guessing minigame starting!\n')
-                        
-                        number_guess()
-                        
-                        broadcast(b'Loading...\n')
-                        time.sleep(3)
-                        
-                    elif random_game == 3:
-                        broadcast(b'Word guessing minigame starting!\n')
-                        
-                        word_guess()
-                        
-                        broadcast(b'Loading...\n')
-                        time.sleep(3)
+                    minigame(random_game)
                                         
                 if q[4] >= end:
                     q[4] == end
@@ -258,6 +226,41 @@ def handle_client(conn, addr):
     with lock:
         players = [p for p in players if p[5] != addr[1]]
     conn.close()
+
+def minigame(rand):
+    if random_game == 1:
+        broadcast(b'Speed typing minigame starting!\n')
+        
+        minigame_scores = []
+        for p in players:
+            try:
+                score = speed_typing(p[6])
+            except Exception as e:
+                score = 0
+                p[6].sendall(b"Error during minigame. Score: 0\n")
+            p[3] += score
+            minigame_scores.append((p[1], score, p[3]))
+            
+        for name, score, total in minigame_scores:
+            broadcast(f"{name} scored {score} points in the minigame, now has {total} points.\n")
+        broadcast(b'Loading...\n')
+        time.sleep(3)
+        
+    elif random_game == 2:
+        broadcast(b'Numer guessing minigame starting!\n')
+        
+        number_guess()
+        
+        broadcast(b'Loading...\n')
+        time.sleep(3)
+        
+    elif random_game == 3:
+        broadcast(b'Word guessing minigame starting!\n')
+        
+        word_guess()
+        
+        broadcast(b'Loading...\n')
+        time.sleep(3)
 
 def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
