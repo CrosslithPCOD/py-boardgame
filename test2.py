@@ -4,13 +4,13 @@ def number_guess():
     score = 5
     top = 10
     ready = ""
-    print("Guess the right number between 1 and 10\n"
+    print("Guess the right number between 1 and 20\n"
           "Type 'start' when you're ready")
     while ready != "start":
         ready = input()
     print("")
 
-    num = random.randint(1, 10)
+    num = random.randint(1, 20)
     while turn > 0:
         print(num)
         print(f"You still have {turn} guesses left")
